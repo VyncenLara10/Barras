@@ -7,9 +7,17 @@ const escapeHtml = s => strip(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 function alertUser(message, error=false){const t=$('toast');t.textContent=message;t.className='show'+(error?' error':'');clearTimeout(alertUser.timer);alertUser.timer=setTimeout(()=>t.className='',4200)}
 function downloadable(text,name,mime){const url=URL.createObjectURL(new Blob([text],{type:mime}));const link=document.createElement('a');link.href=url;link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
-function downloadTemplateCSV(){downloadable('\ufeffnombre,codigo,precio,cantidad\r\nCafé molido 500g,PROD-00124,Q 85.00,2\r\nMouse inalámbrico,TEC-00035,Q 125.00,1\r\n','plantilla-barras.csv','text/csv;charset=utf-8')}
-function downloadTemplateExcel(){if(!window.XLSX){alertUser('No pudo cargarse la librería Excel. Usa la plantilla CSV.',true);return}const rows=[{nombre:'Café molido 500g',codigo:'PROD-00124',precio:'Q 85.00',cantidad:2},{nombre:'Mouse inalámbrico',codigo:'TEC-00035',precio:'Q 125.00',cantidad:1}];const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),'Productos');XLSX.writeFile(wb,'plantilla-barras.xlsx')}
-$('topTemplate').addEventListener('click',downloadTemplateCSV);$('templateCSV').addEventListener('click',downloadTemplateCSV);$('templateExcel').addEventListener('click',downloadTemplateExcel);
+function downloadTemplateCSV(){
+  const rows=[['Nombre del producto','Codigo / SKU','Precio','Cantidad','Categoria','Descripcion'],['Café de especialidad 500g','PROD-00124','Q 85.00',12,'Alimentos','Paquete de 500 g'],['Mouse inalámbrico','TEC-00035','Q 125.00',8,'Tecnología','USB inalámbrico'],['Libreta profesional','ESC-01120','Q 28.00',30,'Oficina','Tamaño carta']];
+  const cell=v=>{const text=String(v);return /[",\r\n]/.test(text)?'"'+text.replaceAll('"','""')+'"':text};
+  downloadable('\ufeff'+rows.map(row=>row.map(cell).join(',')).join('\r\n')+'\r\n','plantilla-productos.csv','text/csv;charset=utf-8');
+}
+function downloadTemplateExcel(){
+  const a=document.createElement('a');a.href='assets/plantilla-productos.xlsx';a.download='plantilla-productos.xlsx';document.body.appendChild(a);a.click();a.remove();
+}
+$('topTemplate').addEventListener('click',downloadTemplateExcel);
+$('templateCSV').addEventListener('click',downloadTemplateCSV);
+$('templateExcel').addEventListener('click',downloadTemplateExcel);
 const drop=$('drop'), file=$('file');drop.addEventListener('click',()=>file.click());drop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();file.click()}});['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag')}));['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag')}));drop.addEventListener('drop',e=>{const f=e.dataTransfer?.files?.[0];if(f)processFile(f)});file.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)processFile(f);file.value='' });
 async function processFile(f){try{if(!/\.(csv|xls|xlsx)$/i.test(f.name))throw Error('Formato no permitido: usa .csv, .xls o .xlsx.');if(f.size>MAX_FILE)throw Error('El archivo supera el límite de 10 MB.');if(!window.XLSX)throw Error('No se pudo cargar el lector Excel. Revisa tu conexión y vuelve a intentar.');const data=await f.arrayBuffer();const wb=XLSX.read(data,{type:'array',raw:false,cellText:true});if(!wb.SheetNames.length)throw Error('El archivo no tiene hojas.');const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:'',blankrows:false,raw:false});if(!rows.length)throw Error('No hay filas en el archivo.');rawRows=rows.map(r=>Array.isArray(r)?r.map(strip):[]);fileName=f.name;setupMapping();$('fileStatus').textContent='✓ '+f.name+' · '+Math.max(0,rows.length-1)+' filas detectadas';$('fileStatus').hidden=false;$('mapping').hidden=false;alertUser('Archivo leído. Confirma las columnas para importar.')}catch(e){alertUser(e.message,true)}}
 const columnNames=()=>{const max=Math.max(1,...rawRows.slice(0,100).map(r=>r.length));return Array.from({length:Math.min(max,100)},(_,i)=>i)};
@@ -33,7 +41,37 @@ function render(){const labels=expandLabels(),cfg=layout(),fmt=activeFormat();$(
 function renderTable(){const query=$('search').value.toLowerCase(),data=products.filter(p=>(p.name+' '+p.code).toLowerCase().includes(query));$('rows').replaceChildren();if(!data.length){$('rows').innerHTML='<tr><td colspan="3">'+(products.length?'Sin resultados.':'Todavía no has añadido artículos.')+'</td></tr>'}else for(const p of data.slice(0,200)){const tr=document.createElement('tr');tr.innerHTML=`<td>${escapeHtml(p.name)}</td><td><code>${escapeHtml(p.code)}</code></td><td><button class="remove" data-id="${escapeHtml(p.id)}" aria-label="Eliminar artículo">Eliminar</button></td>`;$('rows').appendChild(tr)}$('listStatus').textContent=`${data.length} de ${products.length} artículos${data.length>200?' · mostrando los primeros 200':''}`}
 $('scanForm').addEventListener('submit',e=>{e.preventDefault();const code=strip($('scanInput').value);const match=products.find(p=>p.code===code);const result=$('scanResult');result.className='scan-result '+(match?'good':'bad');result.textContent=match?`✓ Encontrado: ${match.name} · ${match.code}`:code?'No existe coincidencia exacta en el inventario actual.':'Escanea o escribe un código primero.';$('scanInput').select()});
 $('printHelp').addEventListener('click',()=>$('helpDialog').showModal());for(const id of ['closeDialog','closeDialog2'])$(id).addEventListener('click',()=>$('helpDialog').close());
-function wrapText(doc,text,maxWidth,maxLines){const lines=doc.splitTextToSize(text,maxWidth);return lines.slice(0,maxLines)}
-function drawLabel(doc,p,fmt,x,y,w,h){const inset=3, innerW=w-2*inset;const name=$('showName').checked,code=$('showCode').checked,price=$('showPrice').checked&&!!p.price;doc.setDrawColor(216,226,221);doc.setLineWidth(.15);doc.rect(x,y,w,h);doc.setTextColor(16,41,54);let cursor=y+2.5;if(name){doc.setFont('helvetica','bold');doc.setFontSize(Math.min(9,Math.max(6,w/10)));const lines=wrapText(doc,p.name,innerW,2);for(const line of lines){doc.text(line,x+w/2,cursor+3,{align:'center'});cursor+=3.6}cursor+=1.5}const remaining=Math.max(8,y+h-cursor-(code?5:0)-(price?4:0)-3);const img=generatedImage(p.code,fmt);if(fmt==='QR'){const side=Math.min(remaining,innerW*.73,32);doc.addImage(img,'PNG',x+w/2-side/2,cursor,side,side,'','FAST');cursor+=side+1}else{const imgW=innerW*.92,imgH=Math.min(remaining,22);doc.addImage(img,'PNG',x+w/2-imgW/2,cursor,imgW,imgH,'','FAST');cursor+=imgH+1}if(code){doc.setFont('helvetica','normal');doc.setFontSize(Math.max(5,Math.min(8,w/12)));const clipped=p.code.length>40?p.code.slice(0,39)+'…':p.code;doc.text(clipped,x+w/2,Math.min(y+h-3,cursor+2.5),{align:'center',maxWidth:innerW});cursor+=4}if(price){doc.setFont('helvetica','bold');doc.setFontSize(7);doc.text(p.price,x+w/2,Math.min(y+h-1.5,cursor+2),{align:'center',maxWidth:innerW})}}
-$('pdf').addEventListener('click',async()=>{const btn=$('pdf');btn.disabled=true;btn.textContent='Generando PDF...';try{if(!window.jspdf)throw Error('No se pudo cargar la biblioteca de PDF.');const labels=expandLabels();if(!labels.length)throw Error('Agrega productos primero.');const fmt=activeFormat();const invalid=labels.filter(p=>checkBarcode(p.code,fmt));if(invalid.length)throw Error(`${invalid.length} etiquetas tienen códigos incompatibles con ${fmt}. Ejemplo: ${invalid[0].code} (${checkBarcode(invalid[0].code,fmt)}).`);if($('repeatQty').checked&&products.reduce((a,p)=>a+p.qty,0)>MAX_LABELS)throw Error(`El límite por lote es ${MAX_LABELS} etiquetas. Reduce las cantidades.`);const {jsPDF}=window.jspdf;const doc=new jsPDF({orientation:'portrait',unit:'mm',format:$('paper').value==='letter'?'letter':'a4',compress:true});const width=doc.internal.pageSize.getWidth(),height=doc.internal.pageSize.getHeight();const cfg=layout(),margin=9,gap=2;const cellW=(width-margin*2-gap*(cfg.cols-1))/cfg.cols,cellH=(height-margin*2-gap*(cfg.rows-1))/cfg.rows;for(let i=0;i<labels.length;i++){if(i>0&&i%cfg.perPage===0)doc.addPage();const local=i%cfg.perPage,col=local%cfg.cols,row=Math.floor(local/cfg.cols);drawLabel(doc,labels[i],fmt,margin+col*(cellW+gap),margin+row*(cellH+gap),cellW,cellH);if(i%70===0)await wait(0)}doc.save('barras-studio-etiquetas.pdf');alertUser(`✓ PDF creado con ${labels.length} etiquetas y ${Math.ceil(labels.length/cfg.perPage)} páginas.`)}catch(err){console.error(err);alertUser(err.message||'No se pudo crear el PDF.',true)}finally{btn.disabled=!products.length;btn.textContent='Descargar PDF para imprimir ↓'}});
+$('pdf').addEventListener('click',async()=>{
+  const btn=$('pdf'), original=btn.textContent;
+  btn.disabled=true;btn.textContent='Preparando documento...';
+  try{
+    if(!window.BarrasPdf)throw Error('No se cargó el módulo PDF local. Actualiza la página para cargar los archivos nuevos.');
+    const labels=expandLabels();
+    if(!labels.length)throw Error('Agrega productos primero.');
+    const fmt=activeFormat();
+    const invalid=labels.filter(p=>checkBarcode(p.code,fmt));
+    if(invalid.length)throw Error(`${invalid.length} etiquetas no pueden generarse en ${fmt}. Ejemplo: ${invalid[0].code} (${checkBarcode(invalid[0].code,fmt)}).`);
+    if($('repeatQty').checked&&products.reduce((a,p)=>a+p.qty,0)>MAX_LABELS)throw Error(`El límite por descarga es ${MAX_LABELS} etiquetas. Reduce las cantidades.`);
+    const result=await BarrasPdf.create({
+      labels,format:fmt,paper:$('paper').value,...layout(),
+      showName:$('showName').checked,showCode:$('showCode').checked,showPrice:$('showPrice').checked,
+      getImage:generatedImage,
+      onProgress:(done,total)=>{btn.textContent=`Generando PDF · página ${done} de ${total}...`;}
+    });
+    alertUser(`✓ PDF descargado: ${labels.length} etiquetas en ${result.pages} página(s).`);
+  }catch(err){console.error(err);alertUser(err.message||'No se pudo crear el PDF.',true)}
+  finally{btn.disabled=!products.length;btn.textContent=original}
+});
+// Transferencia temporal del inventario al generador. Se elimina inmediatamente:
+// no se guarda ninguna fila en el generador después de usarla.
+try{
+  const transferred=sessionStorage.getItem('barras-generator-import');
+  if(transferred){
+    sessionStorage.removeItem('barras-generator-import');
+    const incoming=JSON.parse(transferred);
+    if(Array.isArray(incoming)){
+      products=incoming.slice(0,10000).filter(p=>p&&p.name&&p.code).map(p=>({id:cryptoId(),name:strip(p.name).slice(0,120),code:strip(p.code).slice(0,160),price:strip(p.price).slice(0,50),qty:Math.max(1,Math.min(999,Number(p.stock)||1))}));
+    }
+  }
+}catch(err){console.warn('No se pudo transferir la sesión del inventario',err)}
 render();
